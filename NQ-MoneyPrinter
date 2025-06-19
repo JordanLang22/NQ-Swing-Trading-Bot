@@ -36,11 +36,15 @@ williams_r = ta.wpr(140)
 // Bollinger Bands
 [bb_upper, bb_basis, bb_lower] = ta.bb(close, 20, 2.0)
 
-// Multi-Timeframe Analysis using proper request.security syntax
-htf_supertrend = request.security(syminfo.tickerid, "60", ta.supertrend(3, 10))
-htf_trend = request.security(syminfo.tickerid, "60", close > htf_supertrend[0] ? true : false)
+// Multi-Timeframe Analysis - Simplified and working approach
+htf_ema10 = request.security(syminfo.tickerid, "60", ta.ema(close, 10))
+htf_ema20 = request.security(syminfo.tickerid, "60", ta.ema(close, 20))
+htf_close = request.security(syminfo.tickerid, "60", close)
+htf_trend = htf_close > htf_ema10 and htf_ema10 > htf_ema20
+
 mtf_ema50 = request.security(syminfo.tickerid, "15", ta.ema(close, 50))
-mtf_bias = request.security(syminfo.tickerid, "15", close > mtf_ema50 ? true : false)
+mtf_close = request.security(syminfo.tickerid, "15", close)
+mtf_bias = mtf_close > mtf_ema50
 
 // Volume Analysis
 vwap_value = ta.vwap(hlc3)
@@ -132,13 +136,13 @@ if final_short and na(short_entry_price)
 
 // Exit conditions
 if not na(long_entry_price)
-    if close <= long_stop_price or close >= long_target_price
+    if close <= long_stop_price or close >= long_target_price or in_prertth
         long_entry_price := na
         long_stop_price := na
         long_target_price := na
 
 if not na(short_entry_price)
-    if close >= short_stop_price or close <= short_target_price
+    if close >= short_stop_price or close <= short_target_price or in_prertth
         short_entry_price := na
         short_stop_price := na
         short_target_price := na
@@ -186,7 +190,7 @@ if show_targets and not na(short_target_price)
              color=color.green, style=line.style_dashed, width=1)
 
 // Info Panel
-var table infoTable = table.new(position.top_right, 3, 8, bgcolor=color.new(color.black, 80))
+var table infoTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80))
 
 if barstate.islast
     table.cell(infoTable, 0, 0, "Current Session:", text_color=color.white, text_size=size.small)
@@ -209,6 +213,14 @@ if barstate.islast
     table.cell(infoTable, 0, 5, "Volume Spike:", text_color=color.white, text_size=size.small)
     table.cell(infoTable, 1, 5, volume_spike ? "YES" : "NO", 
                text_color=volume_spike ? color.green : color.red, text_size=size.small)
+    
+    table.cell(infoTable, 0, 6, "HTF Trend:", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 6, htf_trend ? "BULLISH" : "BEARISH", 
+               text_color=htf_trend ? color.green : color.red, text_size=size.small)
+    
+    table.cell(infoTable, 0, 7, "MTF Bias:", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 7, mtf_bias ? "BULLISH" : "BEARISH", 
+               text_color=mtf_bias ? color.green : color.red, text_size=size.small)
 
 // Alerts
 alertcondition(final_long, title="Long Entry", message="NQ Long Signal - Entry: {{close}}, Stop: {{plot_0}}, Target: {{plot_1}}")
