@@ -1,0 +1,72 @@
+//@version=5
+indicator("NQ Overnight Edge Master", overlay=true)
+
+// Session Definitions
+asian_session = input.session("1700-0100", "Asian Session")
+european_session = input.session("0100-0730", "European Session") 
+prertth_session = input.session("0600-0730", "Pre-RTH Session")
+
+// Adaptive Parameters Based on Session
+in_asian = time(timeframe.period, asian_session)
+in_european = time(timeframe.period, european_session)
+in_prertth = time(timeframe.period, prertth_session)
+
+// Dynamic ATR Multiplier
+atr_mult = in_asian ? 2.5 : in_european ? 2.0 : 1.5
+atr_length = 14
+atr_value = ta.atr(atr_length)
+
+// Core Indicators
+ema_10 = ta.ema(close, 10)
+williams_r = ta.wpr(140)
+[macdLine, signalLine, histLine] = ta.macd(close, 12, 26, 9)
+
+// Multi-Timeframe Analysis
+htf_trend = request.security(syminfo.tickerid, "60", 
+            ta.supertrend(3, 10)[0] < close)
+mtf_bias = request.security(syminfo.tickerid, "15", 
+           close > ta.ema(close, 50))
+
+// Volume Profile Approximation
+vwap_value = ta.vwap(hlc3)
+volume_avg = ta.sma(volume, 20)
+volume_spike = volume > volume_avg * 1.5
+
+// Statistical Edge Conditions
+asian_high = ta.valuewhen(in_asian, ta.highest(high, 20), 0)
+asian_low = ta.valuewhen(in_asian, ta.lowest(low, 20), 0)
+asian_range = asian_high - asian_low
+
+london_breakout = in_european and 
+                 (close > asian_high + 5 or close < asian_low - 5) and
+                 volume_spike
+
+// Mean Reversion Setup
+std_dev = ta.stdev(close, 20)
+mean_rev_long = close < vwap_value - (2 * std_dev) and 
+                in_asian and not volume_spike
+mean_rev_short = close > vwap_value + (2 * std_dev) and 
+                 in_asian and not volume_spike
+
+// Risk Management
+position_size = 1 // Adjust based on account size
+stop_distance = atr_value * atr_mult
+target_distance = atr_value * (atr_mult * 0.6)
+
+// Entry Signals with Multi-Layer Confirmation
+long_signal = (london_breakout and close > asian_high) or
+              (mean_rev_long and williams_r < -80) and
+              htf_trend and mtf_bias and volume_spike
+
+short_signal = (london_breakout and close < asian_low) or
+               (mean_rev_short and williams_r > -20) and
+               not htf_trend and not mtf_bias and volume_spike
+
+// Alerts for Automation
+if long_signal
+    alert("LONG|NQ|" + str.tostring(close) + "|" + 
+          str.tostring(stop_distance), alert.freq_once_per_bar)
+
+if short_signal  
+    alert("SHORT|NQ|" + str.tostring(close) + "|" + 
+          str.tostring(stop_distance), alert.freq_once_per_bar)
