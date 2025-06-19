@@ -1,72 +1,219 @@
 //@version=5
 indicator("NQ Overnight Edge Master", overlay=true)
 
-// Session Definitions
-asian_session = input.session("1700-0100", "Asian Session")
-european_session = input.session("0100-0730", "European Session") 
-prertth_session = input.session("0600-0730", "Pre-RTH Session")
+// Session Definitions (24-hour format)
+asian_session = input.session("1700-0100", "Asian Session", group="Sessions")
+european_session = input.session("0100-0730", "European Session", group="Sessions") 
+prertth_session = input.session("0600-0730", "Pre-RTH Session", group="Sessions")
 
-// Adaptive Parameters Based on Session
-in_asian = time(timeframe.period, asian_session)
-in_european = time(timeframe.period, european_session)
-in_prertth = time(timeframe.period, prertth_session)
+// Input Parameters
+show_signals = input.bool(true, "Show Buy/Sell Signals", group="Display")
+show_stops = input.bool(true, "Show Stop Levels", group="Display")
+show_targets = input.bool(true, "Show Target Levels", group="Display")
+show_sessions = input.bool(true, "Show Session Backgrounds", group="Display")
 
-// Dynamic ATR Multiplier
+// Risk Management Inputs
+account_size = input.float(500, "Account Size ($)", minval=100, group="Risk Management")
+risk_percent = input.float(2.0, "Risk Per Trade (%)", minval=0.5, maxval=5.0, group="Risk Management")
+use_mnq = input.bool(true, "Use MNQ (Micro)", group="Risk Management")
+
+// Session Detection
+in_asian = not na(time(timeframe.period, asian_session))
+in_european = not na(time(timeframe.period, european_session))
+in_prertth = not na(time(timeframe.period, prertth_session))
+
+// Dynamic ATR Multiplier based on session
 atr_mult = in_asian ? 2.5 : in_european ? 2.0 : 1.5
-atr_length = 14
+atr_length = input.int(14, "ATR Length", minval=1, group="Indicators")
 atr_value = ta.atr(atr_length)
 
 // Core Indicators
 ema_10 = ta.ema(close, 10)
+ema_50 = ta.ema(close, 50)
 williams_r = ta.wpr(140)
 [macdLine, signalLine, histLine] = ta.macd(close, 12, 26, 9)
 
-// Multi-Timeframe Analysis
-htf_trend = request.security(syminfo.tickerid, "60", 
-            ta.supertrend(3, 10)[0] < close)
-mtf_bias = request.security(syminfo.tickerid, "15", 
-           close > ta.ema(close, 50))
+// Bollinger Bands
+[bb_upper, bb_basis, bb_lower] = ta.bb(close, 20, 2.0)
 
-// Volume Profile Approximation
+// Multi-Timeframe Analysis using proper request.security syntax
+htf_supertrend = request.security(syminfo.tickerid, "60", ta.supertrend(3, 10))
+htf_trend = request.security(syminfo.tickerid, "60", close > htf_supertrend[0] ? true : false)
+mtf_ema50 = request.security(syminfo.tickerid, "15", ta.ema(close, 50))
+mtf_bias = request.security(syminfo.tickerid, "15", close > mtf_ema50 ? true : false)
+
+// Volume Analysis
 vwap_value = ta.vwap(hlc3)
 volume_avg = ta.sma(volume, 20)
 volume_spike = volume > volume_avg * 1.5
 
-// Statistical Edge Conditions
-asian_high = ta.valuewhen(in_asian, ta.highest(high, 20), 0)
-asian_low = ta.valuewhen(in_asian, ta.lowest(low, 20), 0)
-asian_range = asian_high - asian_low
+// Session High/Low Tracking
+var float asian_high = na
+var float asian_low = na
+var float european_high = na
+var float european_low = na
 
-london_breakout = in_european and 
-                 (close > asian_high + 5 or close < asian_low - 5) and
-                 volume_spike
+// Reset and track Asian session
+if in_asian and not in_asian[1]
+    asian_high := high
+    asian_low := low
+else if in_asian
+    asian_high := math.max(asian_high, high)
+    asian_low := math.min(asian_low, low)
 
-// Mean Reversion Setup
+// Reset and track European session
+if in_european and not in_european[1]
+    european_high := high
+    european_low := low
+else if in_european
+    european_high := math.max(european_high, high)
+    european_low := math.min(european_low, low)
+
+// Calculate Asian Range
+asian_range = na(asian_high) or na(asian_low) ? 0 : asian_high - asian_low
+
+// Statistical Calculations
 std_dev = ta.stdev(close, 20)
-mean_rev_long = close < vwap_value - (2 * std_dev) and 
-                in_asian and not volume_spike
-mean_rev_short = close > vwap_value + (2 * std_dev) and 
-                 in_asian and not volume_spike
+upper_band = vwap_value + (2 * std_dev)
+lower_band = vwap_value - (2 * std_dev)
 
-// Risk Management
-position_size = 1 // Adjust based on account size
-stop_distance = atr_value * atr_mult
-target_distance = atr_value * (atr_mult * 0.6)
+// Mean Reversion Conditions
+mean_rev_long = close < lower_band and in_asian and not volume_spike and williams_r < -80
+mean_rev_short = close > upper_band and in_asian and not volume_spike and williams_r > -20
+
+// London Breakout Conditions
+london_breakout_long = in_european and not na(asian_high) and close > asian_high and volume_spike
+london_breakout_short = in_european and not na(asian_low) and close < asian_low and volume_spike
+
+// Momentum Conditions
+momentum_long = close > ema_10 and ema_10 > ema_50 and macdLine > signalLine and histLine > 0
+momentum_short = close < ema_10 and ema_10 < ema_50 and macdLine < signalLine and histLine < 0
 
 // Entry Signals with Multi-Layer Confirmation
-long_signal = (london_breakout and close > asian_high) or
-              (mean_rev_long and williams_r < -80) and
-              htf_trend and mtf_bias and volume_spike
+long_signal = (london_breakout_long or mean_rev_long) and htf_trend and mtf_bias and volume_spike
+short_signal = (london_breakout_short or mean_rev_short) and not htf_trend and not mtf_bias and volume_spike
 
-short_signal = (london_breakout and close < asian_low) or
-               (mean_rev_short and williams_r > -20) and
-               not htf_trend and not mtf_bias and volume_spike
+// Alternative Entry Signals (Less Strict)
+alt_long_signal = mean_rev_long and close > bb_lower and volume > volume_avg * 0.8
+alt_short_signal = mean_rev_short and close < bb_upper and volume > volume_avg * 0.8
 
-// Alerts for Automation
-if long_signal
-    alert("LONG|NQ|" + str.tostring(close) + "|" + 
-          str.tostring(stop_distance), alert.freq_once_per_bar)
+// Final Signal Selection
+final_long = long_signal or alt_long_signal
+final_short = short_signal or alt_short_signal
 
-if short_signal  
-    alert("SHORT|NQ|" + str.tostring(close) + "|" + 
-          str.tostring(stop_distance), alert.freq_once_per_bar)
+// Risk Management Calculations
+stop_distance = atr_value * atr_mult
+target_distance = stop_distance * 1.5  // 1.5:1 Risk/Reward
+
+// Position Sizing
+risk_amount = account_size * (risk_percent / 100)
+point_value = use_mnq ? 2.0 : 20.0  // MNQ = $2/point, NQ = $20/point
+position_size = risk_amount / (stop_distance * point_value)
+position_size_rounded = math.round(position_size)
+
+// Entry Price Tracking
+var float long_entry_price = na
+var float short_entry_price = na
+var float long_stop_price = na
+var float short_stop_price = na
+var float long_target_price = na
+var float short_target_price = na
+
+// Update entry prices on signals
+if final_long and na(long_entry_price)
+    long_entry_price := close
+    long_stop_price := close - stop_distance
+    long_target_price := close + target_distance
+
+if final_short and na(short_entry_price)
+    short_entry_price := close
+    short_stop_price := close + stop_distance
+    short_target_price := close - target_distance
+
+// Exit conditions
+if not na(long_entry_price)
+    if close <= long_stop_price or close >= long_target_price
+        long_entry_price := na
+        long_stop_price := na
+        long_target_price := na
+
+if not na(short_entry_price)
+    if close >= short_stop_price or close <= short_target_price
+        short_entry_price := na
+        short_stop_price := na
+        short_target_price := na
+
+// Plotting
+plot(ema_10, "EMA 10", color=color.yellow, linewidth=2)
+plot(ema_50, "EMA 50", color=color.orange, linewidth=2)
+plot(vwap_value, "VWAP", color=color.white, linewidth=2)
+
+// Bollinger Bands
+plot(bb_upper, "BB Upper", color=color.new(color.blue, 50))
+plot(bb_basis, "BB Basis", color=color.new(color.blue, 50))
+plot(bb_lower, "BB Lower", color=color.new(color.blue, 50))
+
+// Statistical Bands
+plot(upper_band, "2 STD Upper", color=color.new(color.purple, 70), style=plot.style_line)
+plot(lower_band, "2 STD Lower", color=color.new(color.purple, 70), style=plot.style_line)
+
+// Session Backgrounds
+bgcolor(show_sessions and in_asian ? color.new(color.blue, 90) : na, title="Asian Session")
+bgcolor(show_sessions and in_european ? color.new(color.orange, 90) : na, title="European Session")
+bgcolor(show_sessions and in_prertth ? color.new(color.red, 90) : na, title="Pre-RTH Session")
+
+// Signal Plotting
+plotshape(show_signals and final_long, title="Long Signal", location=location.belowbar, 
+         color=color.green, style=shape.triangleup, size=size.small)
+plotshape(show_signals and final_short, title="Short Signal", location=location.abovebar, 
+         color=color.red, style=shape.triangledown, size=size.small)
+
+// Stop and Target Lines
+if show_stops and not na(long_stop_price)
+    line.new(bar_index[1], long_stop_price, bar_index, long_stop_price, 
+             color=color.red, style=line.style_dashed, width=1)
+
+if show_stops and not na(short_stop_price)
+    line.new(bar_index[1], short_stop_price, bar_index, short_stop_price, 
+             color=color.red, style=line.style_dashed, width=1)
+
+if show_targets and not na(long_target_price)
+    line.new(bar_index[1], long_target_price, bar_index, long_target_price, 
+             color=color.green, style=line.style_dashed, width=1)
+
+if show_targets and not na(short_target_price)
+    line.new(bar_index[1], short_target_price, bar_index, short_target_price, 
+             color=color.green, style=line.style_dashed, width=1)
+
+// Info Panel
+var table infoTable = table.new(position.top_right, 3, 8, bgcolor=color.new(color.black, 80))
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Current Session:", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, in_asian ? "Asian" : in_european ? "European" : in_prertth ? "Pre-RTH" : "None", 
+               text_color=color.yellow, text_size=size.small)
+    
+    table.cell(infoTable, 0, 1, "ATR Multiplier:", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(atr_mult, "#.#"), text_color=color.yellow, text_size=size.small)
+    
+    table.cell(infoTable, 0, 2, "Position Size:", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(position_size_rounded) + " " + (use_mnq ? "MNQ" : "NQ"), 
+               text_color=color.yellow, text_size=size.small)
+    
+    table.cell(infoTable, 0, 3, "Stop Distance:", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 3, str.tostring(stop_distance, "#.##") + " pts", text_color=color.red, text_size=size.small)
+    
+    table.cell(infoTable, 0, 4, "Target Distance:", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 4, str.tostring(target_distance, "#.##") + " pts", text_color=color.green, text_size=size.small)
+    
+    table.cell(infoTable, 0, 5, "Volume Spike:", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 5, volume_spike ? "YES" : "NO", 
+               text_color=volume_spike ? color.green : color.red, text_size=size.small)
+
+// Alerts
+alertcondition(final_long, title="Long Entry", message="NQ Long Signal - Entry: {{close}}, Stop: {{plot_0}}, Target: {{plot_1}}")
+alertcondition(final_short, title="Short Entry", message="NQ Short Signal - Entry: {{close}}, Stop: {{plot_0}}, Target: {{plot_1}}")
+alertcondition(not na(long_entry_price) and close <= long_stop_price, title="Long Stop Hit", message="Long Stop Hit at {{close}}")
+alertcondition(not na(short_entry_price) and close >= short_stop_price, title="Short Stop Hit", message="Short Stop Hit at {{close}}")
+alertcondition(not na(long_entry_price) and close >= long_target_price, title="Long Target Hit", message="Long Target Hit at {{close}}")
+alertcondition(not na(short_entry_price) and close <= short_target_price, title="Short Target Hit", message="Short Target Hit at {{close}}")
