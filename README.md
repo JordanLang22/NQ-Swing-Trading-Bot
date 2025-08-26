@@ -1,4 +1,4 @@
-# The NQ Overnight Edge Master: A Professional-Grade Trading Indicator for Maximum Profitability
+# The NQ Swing Indicator Suite: A Manual Trading Indicator for Maximum Profitability
 
 ## Core Architecture and Design Philosophy
 
