@@ -1,4 +1,4 @@
-# The NQ Swing Indicator Suite: A Manual Trading Indicator for Maximum Profitability
+# The NQ Swing Indicator Suite: A Manual Trading Indicator
 
 ## Core Architecture and Design Philosophy
 
