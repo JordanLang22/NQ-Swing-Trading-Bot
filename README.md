@@ -2,7 +2,7 @@
 
 ## Core Architecture and Design Philosophy
 
-The most profitable approach for overnight NQ trading combines **mean reversion dominance** with **session-based adaptability** and **multi-layered confirmation systems**. Based on current 2024-2025 market microstructure, where HFT algorithms comprise 65-70% of overnight volume, our indicator must be sophisticated enough to identify genuine opportunities while filtering algorithmic noise.
+The most profitable approach for overnight NQ trading combines **mean reversion dominance** with **session-based adaptability** and **multi-layered confirmation systems**. Based on current 2024-2025 market microstructure, where HFT algorithms comprise 65-70% of overnight volume, the indicator must be sophisticated enough to identify genuine opportunities while filtering algorithmic noise (to avoid whipsaw and fake outs).
 
 ## The Five-Layer Confirmation System
 
@@ -99,7 +99,7 @@ The indicator recognizes three distinct overnight sessions with different behavi
 
 ```pinescript
 //@version=5
-indicator("NQ Overnight Edge Master", overlay=true)
+indicator("NQ Overnight Swing", overlay=true)
 
 // Session Definitions
 asian_session = input.session("1700-0100", "Asian Session")
